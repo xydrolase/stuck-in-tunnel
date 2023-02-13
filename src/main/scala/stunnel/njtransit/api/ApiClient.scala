@@ -7,12 +7,14 @@ import org.http4s.EntityDecoder
 import org.http4s.Method.GET
 import org.http4s.client.Client
 import org.http4s.Header
+import org.http4s.Uri
 import org.http4s.client.dsl.Http4sClientDsl
 
 import stunnel.njtransit.*
 import org.http4s.Header.ToRaw
 
 object MyBusNowApiClient {
+  val ApiV3Root = Uri.unsafeFromString("https://mybusnow.njtransit.com/bustime/api/v3/")
   val RequestIdHeader = "X-Request-Id"
 
   // all headers required by the MyBusNow API
@@ -24,12 +26,12 @@ object MyBusNowApiClient {
 }
 
 trait MyBusNowApiClient[F[_]] {
-  def getRoutes: F[Seq[Route]]
-  def getVehicles(route: String): F[Seq[VehicleLocation]]
+  // def getRoutes: F[Seq[Route]]
+  // def getVehicles(route: String): F[Seq[VehicleLocation]]
   def getPatterns(route: String): F[Seq[Pattern]]
 }
 
-abstract class Http4sMyBusNowApiClient[F[_]: Concurrent](client: Client[F], clock: Clock, keyProvider: KeyProvider[F]) extends MyBusNowApiClient[F] {
+class Http4sMyBusNowApiClient[F[_]: Concurrent](client: Client[F], clock: Clock, keyProvider: KeyProvider[F]) extends MyBusNowApiClient[F] {
   val dsl = new Http4sClientDsl[F] {}
   import dsl.*
   
@@ -63,5 +65,17 @@ abstract class Http4sMyBusNowApiClient[F[_]: Concurrent](client: Client[F], cloc
       )
       response <- client.expect[A](request)
     } yield response
+  }
+
+  override def getPatterns(route: String): F[Seq[Pattern]] = {
+    val uri = List(
+      ("rt", route),
+      ("format", "json"),
+      ("locale", "en"),
+      ("requestType", "getpatterns"),
+      ("rtpidatafeed", "bustime")
+    ).foldLeft(MyBusNowApiClient.ApiV3Root / "getpatterns") { case (uri, kv) => uri +? kv }
+
+    httpGet(uri)
   }
 }

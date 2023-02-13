@@ -8,6 +8,7 @@ import stunnel.util.HMACUtil
 
 import java.time.format.DateTimeFormatter
 import java.time.Instant
+import java.time.ZoneOffset
 
 
 object KeyProvider {
@@ -15,7 +16,7 @@ object KeyProvider {
   val dtFormatter = DateTimeFormatter.RFC_1123_DATE_TIME
 
   def formatTimestamp(epochMilli: Long): String = {
-    dtFormatter.format(Instant.ofEpochMilli(epochMilli))
+    dtFormatter.format(Instant.ofEpochMilli(epochMilli).atZone(ZoneOffset.UTC))
   }
 }
 
@@ -29,7 +30,8 @@ trait KeyProvider[F[_]: Applicative] {
   def sign(uri: Uri, timestamp: Long): F[String] = {
     // compute the HMAC SHA256 hash of the uri using the signature private key
     getSignaturePrivateKey.map { privKey =>
-      val message = uri.toString + KeyProvider.formatTimestamp(timestamp)
+      val offset = uri.toString.indexOf("/api")
+      val message = uri.toString.substring(offset) + KeyProvider.formatTimestamp(timestamp)
       HMACUtil.hmacSha256Hex(message, privKey)
     }
   }
