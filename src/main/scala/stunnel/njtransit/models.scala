@@ -6,7 +6,8 @@ import io.circe.ACursor
 import org.http4s.EntityDecoder
 import org.http4s.circe.jsonOf
 
-import java.time.Instant
+import java.time.{LocalTime, LocalDate, LocalDateTime}
+import java.time.format.DateTimeFormatter
 
 def prepareDecoder(fieldName: String): ACursor => ACursor = (cur: ACursor) => {
   cur.downField("bustime-response").downField(fieldName)
@@ -14,6 +15,36 @@ def prepareDecoder(fieldName: String): ACursor => ACursor = (cur: ACursor) => {
 
 /**
   * Describes the current location of a vehicle. This is returned by the /bustime/api/v3/getvehicles API.
+  * See: http://realtime.ridemcts.com/bustime/apidoc/docs/DeveloperAPIGuide3_0.pdf
+  *
+  * {
+  *    "vid": "5254",
+  *    "tmstmp": "20230214 01:40",
+  *    "lat": "40.76042175292969",
+  *    "lon": "-74.02761840820312",
+  *    "hdg": "200",
+  *    "pid": 519,
+  *    "rt": "126",
+  *    "des": "126 HOBOKEN-PATH",
+  *    "pdist": 13707,
+  *    "dly": false,
+  *    "spd": 11,
+  *    "tatripid": "16",
+  *    "origtatripno": "19045150",
+  *    "tablockid": "126GV019",
+  *    "zone": "",
+  *    "mode": 0,
+  *    "psgld": "EMPTY",
+  *    "srvtmstmp": "20230214 01:40",
+  *    "oid": "549130",
+  *    "or": false,
+  *    "rid": "8",
+  *    "blk": 157179502,
+  *    "tripid": 3897020,
+  *    "tripdyn": 0,
+  *    "stst": 91800,
+  *    "stsd": "2023-02-13"
+  *   },
   *
   * @param vehicleId
   * @param timestamp
@@ -24,8 +55,37 @@ def prepareDecoder(fieldName: String): ACursor => ACursor = (cur: ACursor) => {
   * @param destination
   * @param tripId
   */
-case class VehicleLocation(vehicleId: Int, timestamp: Instant, latitude: Float, longitude: Float,
-  heading: Int, route: String, destination: String, tripId: Int)
+case class VehicleLocation(vehicleId: Int, timestamp: LocalDateTime, latitude: Float, longitude: Float,
+  patternId: Int, route: String, heading: Int, speed: Int, destination: String, delayed: Boolean, 
+  passengerLoad: String, tripId: Int, scheduledStartDt: LocalDateTime)
+
+object VehicleLocation:
+  val tsFormatter = DateTimeFormatter.ofPattern("yyyyMMdd HH:mm")
+
+  given Decoder[VehicleLocation] = Decoder.forProduct14(
+    "vid", "tmstmp", "lat", "lon", "pid", "rt", "hdg", "spd", "des", "dly", "psgld", "tripid", "stst", "stsd") {
+      (vehicleId: String, timestamp: String, lat: String, lng: String, patternId: Int, route: String, 
+        heading: String, speed: Int, destination: String, delayed: Boolean, passengerLoad: String, tripId: Int,
+        schedStartTime: Long, schedStartDate: String) =>
+
+        // schedStartTime is technically seconds since the start of the day, but it could be
+        // over 24 hours since the start of the day (for late-night buses, since usually the "first" bus starts
+        // early in the morning). So we need to check if it's over 24 hours, and if so, add a day to the
+        // parsed date.
+        val (dayShift: Int, secondOfDay: Long) = if (schedStartTime > 86399) {
+          (1, schedStartTime - 86400L)
+        } else (0, schedStartTime)
+        
+        val scheduledDt = LocalTime.ofSecondOfDay(secondOfDay).atDate(
+          LocalDate.parse(schedStartDate, DateTimeFormatter.ISO_LOCAL_DATE).plusDays(dayShift))
+
+        VehicleLocation(vehicleId.toInt, LocalDateTime.parse(timestamp, tsFormatter), lat.toFloat, lng.toFloat,
+          patternId, route, heading.toInt, speed, destination, delayed, passengerLoad, tripId, scheduledDt)
+    }
+
+  given Decoder[Seq[VehicleLocation]] = Decoder.decodeSeq.prepare(prepareDecoder("vehicle"))
+
+  given [F[_]: Concurrent]: EntityDecoder[F, Seq[VehicleLocation]] = jsonOf
 
 case class Route()
 
