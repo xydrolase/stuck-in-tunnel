@@ -27,7 +27,7 @@ object MyBusNowApiClient {
 
 trait MyBusNowApiClient[F[_]] {
   // def getRoutes: F[Seq[Route]]
-  // def getVehicles(route: String): F[Seq[VehicleLocation]]
+  def getVehicles(route: String): F[Seq[VehicleLocation]]
   def getPatterns(route: String): F[Seq[Pattern]]
 }
 
@@ -78,4 +78,16 @@ class Http4sMyBusNowApiClient[F[_]: Concurrent](client: Client[F], clock: Clock,
 
     httpGet(uri)
   }
+
+  override def getVehicles(route: String): F[Seq[VehicleLocation]] = {
+    val uri = List(
+      ("rt", route),
+      ("format", "json"),
+      ("locale", "en"),
+      ("requestType", "getvehicles"),
+    ).foldLeft(MyBusNowApiClient.ApiV3Root / "getvehicles") { case (uri, kv) => uri +? kv }
+
+    httpGet(uri)
+  }
+
 }

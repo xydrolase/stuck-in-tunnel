@@ -17,9 +17,11 @@ object Application extends IOApp.Simple {
 
     emberClient.use { client =>
       val apiClient = new Http4sMyBusNowApiClient[IO](client, clock, keyProvider)
-      apiClient.getPatterns("126").flatMap { patterns =>
-        IO.println(patterns)
-      }
+      for {
+        patterns <- apiClient.getPatterns("126")
+        vehicles <- apiClient.getVehicles("126")
+        effect <- IO.println(patterns) *> IO.println(vehicles)
+      } yield effect
     }.void
   }
 }
