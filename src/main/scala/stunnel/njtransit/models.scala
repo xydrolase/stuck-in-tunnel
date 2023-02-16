@@ -87,7 +87,38 @@ object VehicleLocation:
 
   given [F[_]: Concurrent]: EntityDecoder[F, Seq[VehicleLocation]] = jsonOf
 
-case class Route()
+/**
+ * Describes a bus route.
+ *
+ * Example JSON:
+ * {{{
+ *   {
+ *     "rt": "1",
+ *     "rtnm": "1 Newark",
+ *     "rtclr": "#ff3366",
+ *     "rtdd": "1"
+ *   },
+ *   {
+ *     "rt": "2",
+ *     "rtnm": "2 Jersey City-JournalSq-Secaucus",
+ *     "rtclr": "#ff6600",
+ *     "rtdd": "2"
+ *   }
+ * }}}
+ *
+ * @param route The alphanumeric designator of a route.
+ * @param name Common name of the route.
+ * @param color Color of the route line used in map.
+ */
+case class Route(route: String, name: String, color: String)
+object Route {
+  given Decoder[Route] = Decoder.forProduct3("rt", "rtnm", "rtclr") {
+    (route: String, name: String, color: String) => Route(route, name, color)
+  }
+
+  given Decoder[Seq[Route]] = Decoder.decodeSeq
+  given [F[_]: Concurrent]: EntityDecoder[F, Seq[Route]] = jsonOf
+}
 
 sealed trait PointType
 case object Waypoint extends PointType
