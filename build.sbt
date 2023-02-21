@@ -9,20 +9,21 @@ val CirceVersion = "0.14.3"
 lazy val root = (project in file(".")).settings(
   name := "stuck-in-tunnel",
   libraryDependencies ++= Seq(
-    "org.http4s"      %% "http4s-ember-server"  % Http4sVersion,
-    "org.http4s"      %%  "http4s-ember-client" % Http4sVersion,
-    "org.http4s"      %%  "http4s-circe"        % Http4sVersion,
-    "org.http4s"      %%  "http4s-dsl"          % Http4sVersion,
-    "io.circe"        %%  "circe-parser"        % CirceVersion,
-    "io.circe"        %%  "circe-generic"       % CirceVersion,
+    "org.http4s"            %% "http4s-ember-server" % Http4sVersion,
+    "org.http4s"            %% "http4s-ember-client" % Http4sVersion,
+    "org.http4s"            %% "http4s-circe"        % Http4sVersion,
+    "org.http4s"            %% "http4s-dsl"          % Http4sVersion,
+    "io.circe"              %% "circe-parser"        % CirceVersion,
+    "io.circe"              %% "circe-generic"       % CirceVersion,
 
-    "ch.qos.logback"   %  "logback-classic"     % "1.2.6",
+    "ch.qos.logback"         % "logback-classic"     % "1.2.6",
 
-    // This pulls in the kernel and std modules automatically.
-    "org.typelevel"   %% "cats-effect"          % CatsEffectVersion,
-    "org.typelevel"   %% "cats-effect-kernel"   % CatsEffectVersion,
-    "org.typelevel"   %% "cats-effect-std"      % CatsEffectVersion,
-    "co.fs2"          %% "fs2-core"             % "3.6.1",
+    "org.typelevel"         %% "cats-effect"         % CatsEffectVersion,
+    "org.typelevel"         %% "cats-effect-kernel"  % CatsEffectVersion,
+    "org.typelevel"         %% "cats-effect-std"     % CatsEffectVersion,
+    "co.fs2"                %% "fs2-core"            % "3.6.1",
+
+    "org.locationtech.jts"   % "jts-core"            % "1.19.0",
 
     "org.scalatest"   %% "scalatest"            % "3.2.15" % "test",
   )

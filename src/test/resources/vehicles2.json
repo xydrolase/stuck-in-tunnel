@@ -1,0 +1,62 @@
+{
+	"bustime-response": {
+		"vehicle": [
+			{
+				"vid": "5268",
+				"tmstmp": "20230217 00:39",
+				"lat": "40.763450622558594",
+				"lon": "-74.02539825439453",
+				"hdg": "204",
+				"pid": 519,
+				"rt": "126",
+				"des": "126 HOBOKEN-PATH",
+				"pdist": 12439,
+				"dly": false,
+				"spd": 31,
+				"tatripid": "14",
+				"origtatripno": "19045148",
+				"tablockid": "126GV019",
+				"zone": "",
+				"mode": 0,
+				"psgld": "EMPTY",
+				"srvtmstmp": "20230217 00:39",
+				"oid": "549130",
+				"or": false,
+				"rid": "8",
+				"blk": 157179502,
+				"tripid": 11688020,
+				"tripdyn": 0,
+				"stst": 88200,
+				"stsd": "2023-02-16"
+			},
+			{
+				"vid": "5262",
+				"tmstmp": "20230217 00:39",
+				"lat": "40.7543690999349",
+				"lon": "-74.02949523925781",
+				"hdg": "16",
+				"pid": 1368,
+				"rt": "126",
+				"des": "126 NEW YORK",
+				"pdist": 7856,
+				"dly": false,
+				"spd": 15,
+				"tatripid": "14",
+				"origtatripno": "19045082",
+				"tablockid": "126GV020",
+				"zone": "",
+				"mode": 0,
+				"psgld": "EMPTY",
+				"srvtmstmp": "20230217 00:39",
+				"oid": "545711",
+				"or": false,
+				"rid": "9",
+				"blk": 157180202,
+				"tripid": 10829020,
+				"tripdyn": 0,
+				"stst": 88200,
+				"stsd": "2023-02-16"
+			}
+		]
+	}
+}

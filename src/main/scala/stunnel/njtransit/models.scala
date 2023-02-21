@@ -6,6 +6,8 @@ import io.circe.ACursor
 import org.http4s.EntityDecoder
 import org.http4s.circe.jsonOf
 
+import stunnel.geometry.GeoUtils
+
 import java.time.{LocalTime, LocalDate, LocalDateTime}
 import java.time.format.DateTimeFormatter
 
@@ -57,7 +59,16 @@ def prepareDecoder(fieldName: String): ACursor => ACursor = (cur: ACursor) => {
   */
 case class VehicleLocation(vehicleId: Int, timestamp: LocalDateTime, latitude: Float, longitude: Float,
   patternId: Int, route: String, heading: Int, speed: Int, destination: String, delayed: Boolean, 
-  passengerLoad: String, tripId: Int, scheduledStartDt: LocalDateTime)
+  passengerLoad: String, tripId: Int, scheduledStartDt: LocalDateTime) {
+
+    def sameLocationAs(v2: VehicleLocation): Boolean = {
+      latitude == v2.latitude && longitude == v2.longitude
+    }
+
+    def position: (Double, Double) = {
+      GeoUtils.mercatorLatLonToMeters(latitude.toDouble, longitude.toDouble)
+    }
+}
 
 object VehicleLocation:
   val tsFormatter = DateTimeFormatter.ofPattern("yyyyMMdd HH:mm")
@@ -153,7 +164,10 @@ case object Stop extends PointType
   * @param distance
   */
 case class Point(seqNum: Int, latitude: Float, longitude: Float, pointType: PointType,
-                 stopId: Option[Int], stopName: Option[String], distance: Float)
+                 stopId: Option[Int], stopName: Option[String], distance: Float) {
+  def isStop: Boolean = pointType == Stop
+}
+
 object Point:
   given Decoder[Point] = Decoder.forProduct7(
     "seq", "lat", "lon", "typ", "stpid", "stpnm", "pdist") {
@@ -167,12 +181,12 @@ object Point:
         Point(seqNum, latitude, longitude, pt, stopId.map(_.toInt), stopName, distance)
     }
 
-case class Pattern(id: Int, routeDirection: String, points: Seq[Point])
+case class Pattern(id: Int, routeDirection: String, points: IndexedSeq[Point])
 
 object Pattern:
   given Decoder[Pattern] = Decoder.forProduct3("pid", "rtdir", "pt") {
       (id: Int, routeDirection: String, points: Seq[Point]) =>
-        Pattern(id, routeDirection, points)
+        Pattern(id, routeDirection, points.toVector)
     }
 
   given Decoder[Seq[Pattern]] = Decoder.decodeSeq.prepare(prepareDecoder("ptr"))
