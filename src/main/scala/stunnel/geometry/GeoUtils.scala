@@ -6,6 +6,8 @@ import org.locationtech.jts.math.Vector2D
 import stunnel.njtransit.Point
 
 object GeoUtils {
+  opaque type Gate = (LineSegment, LineSegment)
+
   val Radius: Double = 6378137.0
   val RadianToDegree: Double = math.Pi / 180.0
   /**
@@ -42,6 +44,13 @@ object GeoUtils {
    *               The default width is 20 meters, considering that typical travel
    *               lane width in US is about 10 feet. So a gate of 20 meters wide should
    *               cover enough travel lanes plus some drifts in GPS coordinates.
+   * @param centralAngle If we treat the two legs of the virtual gate like legs of a
+   *                     circular sector, this parameter measures the central angle formed
+   *                     by the two legs. By default, the central angle is PI (180 deg),
+   *                     meaning that the legs span a half circle. Using a central angle
+   *                     smaller than PI may be prefered especially for waypoints on a corner
+   *                     because it helps to detect intersection (vehicles "passing" the
+   *                     virtual gates) more robustly.
    *
    * @return A [[[LineSegment]] of fixed length. By checking if a movement segment crosses
    * with this "gate" segment, we can tell if the vehicle passes the gate or not.
@@ -50,30 +59,47 @@ object GeoUtils {
    *
    */
   def virtualGateOf(alongLine: LineSegment,
-                    fraction: Double = 0.995, width: Double = 30.0): LineSegment = {
+                    fraction: Double = 0.995, width: Double = 30.0,
+                    centralAngle: Double = math.Pi): Gate = {
+
+    def rotateThenNorm(vec: Vector2D, rad: Double): Vector2D = {
+      vec.rotate(rad).divide(vec.length)
+    }
+
     val gateCenter = alongLine.pointAlong(fraction)
     // get the vector representing the directional vector of the `alongLine`
     val directionVector = new Vector2D(alongLine.getCoordinate(0), alongLine.getCoordinate(1))
-    // get the norm (unit) vector by rotating 90 degrees
-    val normVector = directionVector.rotate(math.Pi / 2).divide(directionVector.length)
+    val rotRad = math.Pi - centralAngle / 2
     
-    new LineSegment(
-      gateCenter + normVector.multiply(width / 2),
-      gateCenter + normVector.multiply(width / 2).negate()
+    (
+      new LineSegment(
+        gateCenter,
+        gateCenter + rotateThenNorm(directionVector, rotRad).multiply(width / 2)
+      ),
+
+      new LineSegment(
+        gateCenter,
+        gateCenter + rotateThenNorm(directionVector, -rotRad).multiply(width / 2)
+      )
     )
   }
 
-  opaque type Gate = LineSegment
-
   extension (gate: Gate) {
+    /**
+     * Test if a [[Gate]] is passed by (vehicle) movement represented by the provided `segment`.
+     * @return true if the provided `segment` intersects with the [[Gate]].
+     */
     def passedBy(segment: LineSegment): Boolean = {
-      Option(gate.intersection(segment)).isDefined
+      Option(gate._1.intersection(segment)).isDefined ||
+        Option(gate._2.intersection(segment)).isDefined
     }
 
-    def geoCoordinates:((Double, Double), (Double, Double)) = {
+    def geoCoordinates:((Double, Double), (Double, Double), (Double, Double)) = {
       (
-        inverseMercator(gate.getCoordinate(0).getX, gate.getCoordinate(0).getY),
-        inverseMercator(gate.getCoordinate(1).getX, gate.getCoordinate(1).getY)
+        // left leg -> center -> right leg
+        inverseMercator(gate._1.getCoordinate(1).getX, gate._1.getCoordinate(1).getY),
+        inverseMercator(gate._1.getCoordinate(0).getX, gate._1.getCoordinate(0).getY),
+        inverseMercator(gate._2.getCoordinate(1).getX, gate._2.getCoordinate(1).getY)
       )
     }
   }
@@ -89,12 +115,20 @@ object GeoUtils {
       }
     }
 
-    def segmentGates(fraction: Double = 0.995, width: Double = 100.0): Iterator[Gate] = {
+    def segmentGates(fraction: Double = 0.995, width: Double = 100.0,
+                     centralAngle: Double = math.Pi): Iterator[Gate] = {
       segments.map { seg =>
-        virtualGateOf(seg, fraction, width)
+        virtualGateOf(seg, fraction, width, centralAngle)
       }
     }
 
+    /**
+     * Find all waypoints passed by a (vehicle) movement represented by `line` (the line
+     * consists of two points representing two locations of the vehicle at different time).
+     *
+     * Using this method, we can find out which bus stop(s) a vehicle visited during its
+     * movement represented by `line`.
+     */
     def pointsCrossed(line: LineSegment): Seq[Point] = {
       segmentGates().zipWithIndex.collect { 
         case (gate, index) if gate.passedBy(line) => pattern.points(index + 1)

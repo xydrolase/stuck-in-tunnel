@@ -4,6 +4,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.matchers.should.Matchers
 
 class ModelsSpec extends AnyWordSpec with Matchers {
+
   "the Pattern data model" should {
     "be decodeable from API response" in {
       val response = """

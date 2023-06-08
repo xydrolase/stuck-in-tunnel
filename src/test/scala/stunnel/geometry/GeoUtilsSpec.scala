@@ -48,18 +48,16 @@ class GeoUtilsSpec extends AnyWordSpec with Matchers {
         pattern.pointsCrossed(movement2).find(_.isStop).get.stopName shouldBe Some("WILLOW AVE AT 15TH ST")
       }
 
-      /*
       "compute gates" in {
         val pattern = loadResource[Seq[Pattern]]("/patterns.json").head
         val coords = pattern.points.map { p =>
           s"{lat: ${p.latitude}, lng: ${p.longitude}}"
         }
         println(coords.mkString(",\n"))
-        pattern.segmentGates(width = 100.0).foreach { gate =>
+        pattern.segmentGates(width = 30.0, centralAngle = 0.75 * math.Pi).foreach { gate =>
           println(gate.geoCoordinates)
         }
       }
-      */
     }
   }
 }

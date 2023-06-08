@@ -23,8 +23,12 @@ lazy val root = (project in file(".")).settings(
     "org.typelevel"         %% "cats-effect-std"     % CatsEffectVersion,
     "co.fs2"                %% "fs2-core"            % "3.6.1",
 
-    "org.locationtech.jts"   % "jts-core"            % "1.19.0",
+    "org.apache.arrow"       % "arrow-vector"        % "12.0.0",
+    "org.apache.arrow"       % "arrow-dataset"       % "12.0.0",
 
-    "org.scalatest"   %% "scalatest"            % "3.2.15" % "test",
+    "com.softwaremill.magnolia1_3" %% "magnolia" % "1.3.0",
+
+    "org.locationtech.jts"   % "jts-core"            % "1.19.0",
+    "org.scalatest"         %% "scalatest"           % "3.2.15" % "test",
   )
 )
