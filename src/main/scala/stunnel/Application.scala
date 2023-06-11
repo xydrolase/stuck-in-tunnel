@@ -7,7 +7,7 @@ import cats.implicits.*
 import cats.effect.unsafe.IORuntime
 
 import org.http4s.ember.client.EmberClientBuilder
-import fs2.Stream
+import fs2.{Stream, Pipe}
 
 import stunnel.njtransit.{Pattern, VehicleLocation}
 import stunnel.njtransit.api.*
@@ -18,12 +18,9 @@ import scala.concurrent.duration.*
 import stunnel.concurrent.{KeyedCache, ConcurrentKeyedCache}
 
 object Application extends IOApp.Simple {
-
   def getRoutes: IO[List[String]] = Env[IO].get("STUNNEL_ROUTES").map(r => r.getOrElse("").split(',').toList)
 
   def buildStream(client: Http4sMyBusNowApiClient[IO], patternCache: KeyedCache[String, Pattern]): Stream[IO, Unit] = {
-    val prevLocations: java.util.concurrent.ConcurrentMap[Int, Ref[IO, Option[VehicleLocation]]] = new java.util.concurrent.ConcurrentHashMap()
-
     Stream.awakeEvery[IO](10.seconds)
       .evalMap { _ =>
         getRoutes.flatMap { routes => routes.map(r => client.getVehicles(r)).sequence }
@@ -33,24 +30,15 @@ object Application extends IOApp.Simple {
           s ++ Stream.emits(vehicles)
         }
       }
-      .evalMap { vecLoc =>
-        prevLocations.computeIfAbsent(vecLoc.tripId, _ => Ref.unsafe[IO, Option[VehicleLocation]](None))
-          .getAndUpdate(_ => Some(vecLoc))
-          .map { prevLoc =>
-            (prevLoc, vecLoc)
-          }
-      }
-      .evalTap { case (x, y) =>
-        x match {
-          case None => IO.unit
-          case Some(x) =>
-            val movement = CoordOf[VehicleLocation].lineBetween(x, y)
-            patternCache.loadNoExpiry(y.route)(client.getPatterns(y.route).map(_.head)).flatMap { pattern =>
-              val arrivedStops = pattern.pointsCrossed(movement).filter(_.isStop)
-              if (arrivedStops.nonEmpty) {
-                IO.println(s"[${y.route}] Vehicle ${y.vehicleId} (T${y.tripId}) passed stop(s) ${arrivedStops.mkString(", ")}")
-              } else IO.unit
-            }
+      // track at most 500 trips at once (with an LRU cache)
+      .through(Ops.trackMovement(500))
+      .evalTap { vecMove =>
+        val vec = vecMove.currentLocation
+        patternCache.loadNoExpiry(vec.route)(client.getPatterns(vec.route).map(_.head)).flatMap { pattern =>
+          val arrivedStops = pattern.pointsCrossed(vecMove.movement).filter(_.isStop)
+          if (arrivedStops.nonEmpty) {
+            IO.println(s"[${vec.route}] Vehicle ${vec.vehicleId} (T${vec.tripId}) passed stop(s) ${arrivedStops.mkString(", ")}")
+          } else IO.unit
         }
       }
       .void

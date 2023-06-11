@@ -24,6 +24,7 @@ lazy val root = (project in file(".")).settings(
     "co.fs2"                %% "fs2-core"            % "3.6.1",
 
     "org.apache.arrow"       % "arrow-vector"        % "12.0.0",
+    "org.apache.arrow"       % "arrow-memory-netty"  % "12.0.0",
     "org.apache.arrow"       % "arrow-dataset"       % "12.0.0",
 
     "com.softwaremill.magnolia1_3" %% "magnolia" % "1.3.0",
