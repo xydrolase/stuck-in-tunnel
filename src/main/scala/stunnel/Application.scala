@@ -2,7 +2,7 @@ package stunnel
 
 import cats.effect.{IO, IOApp}
 import cats.effect.kernel.Ref
-import cats.effect.std.Env
+import cats.effect.std.{Env, Queue}
 import cats.implicits.*
 import cats.effect.unsafe.IORuntime
 
@@ -16,11 +16,16 @@ import stunnel.geometry.GeoUtils.pointsCrossed
 
 import scala.concurrent.duration.*
 import stunnel.concurrent.{KeyedCache, ConcurrentKeyedCache}
+import fs2.io.file.Files
 
 object Application extends IOApp.Simple {
+  val BatchSize = 20
+  val FileLimit = 100
+
   def getRoutes: IO[List[String]] = Env[IO].get("STUNNEL_ROUTES").map(r => r.getOrElse("").split(',').toList)
 
-  def buildStream(client: Http4sMyBusNowApiClient[IO], patternCache: KeyedCache[String, Pattern]): Stream[IO, Unit] = {
+  def buildStream(client: Http4sMyBusNowApiClient[IO], patternCache: KeyedCache[String, Pattern],
+                  vecLocQueue: Queue[IO, VehicleLocation]): Stream[IO, Unit] = {
     Stream.awakeEvery[IO](10.seconds)
       .evalMap { _ =>
         getRoutes.flatMap { routes => routes.map(r => client.getVehicles(r)).sequence }
@@ -30,6 +35,7 @@ object Application extends IOApp.Simple {
           s ++ Stream.emits(vehicles)
         }
       }
+      .through(Ops.publishVehicleLocation(vecLocQueue))
       // track at most 500 trips at once (with an LRU cache)
       .through(Ops.trackMovement(500))
       .evalTap { vecMove =>
@@ -56,12 +62,27 @@ object Application extends IOApp.Simple {
       val apiClient = new Http4sMyBusNowApiClient[IO](client, clock, keyProvider)
       val patternCache = new ConcurrentKeyedCache[String, Pattern]()
 
-      (for {
+      for {
         routes <- getRoutes
         _ <- IO.println(s"Routes: $routes")
-        stream = buildStream(apiClient, patternCache)
-      } yield stream.compile.drain).flatten
+        vecLocQueue <- Queue.unbounded[IO, VehicleLocation]
 
+        producerStream = buildStream(apiClient, patternCache, vecLocQueue)
+        writerStream = Stream.fromQueueUnterminated(vecLocQueue, 16).through(
+          Ops.writeArrowRotate[VehicleLocation](
+            Files[IO].tempFile(None, "stunnel_vec_loc_", ".arrow", permissions = None).use(p => IO.pure(p)),
+            FileLimit, BatchSize
+          )
+        ).evalTap { path =>
+          IO.println(s"File rotated: ${path.toString}")
+        }
+
+        result <- Stream(
+          producerStream,
+          writerStream
+        ).parJoin(2).compile.drain
+
+      } yield result 
     }.void
   }
 }

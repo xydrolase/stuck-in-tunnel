@@ -28,7 +28,7 @@ object Cached {
           case State.NoValue => updating()
           // if the state has expired already, evict the state and compute a new one
           case _ @ State.Value(_, expiry) if expiry.exists(_ <= timestamp) => updating()
-          case st @ State.Value(v, _) => st-> IO.pure(v)
+          case st @ State.Value(v, _) => st -> IO.pure(v)
           case st @ State.Updating(await) => st -> await.get.rethrow
         }.flatten
       }

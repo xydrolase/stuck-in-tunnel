@@ -1,15 +1,16 @@
 package stunnel.njtransit
 
 import cats.effect.kernel.Concurrent
-import io.circe.Decoder
-import io.circe.ACursor
+import cats.Show
+import io.circe.{Decoder, ACursor}
 import org.http4s.EntityDecoder
 import org.http4s.circe.jsonOf
 
-import stunnel.geometry.GeoUtils
-
 import java.time.{LocalTime, LocalDate, LocalDateTime}
 import java.time.format.DateTimeFormatter
+
+import sarrow.FieldTypeOf
+import stunnel.geometry.GeoUtils
 
 def prepareDecoder(fieldName: String): ACursor => ACursor = (cur: ACursor) => {
   cur.downField("bustime-response").downField(fieldName)
@@ -135,6 +136,15 @@ sealed trait PointType
 case object Waypoint extends PointType
 case object Stop extends PointType
 
+object PointType {
+  given Show[PointType] with
+    def show(pt: PointType): String = pt match
+      case Waypoint => "W"
+      case Stop => "S"
+
+  given FieldTypeOf[PointType] = FieldTypeOf.withShowWriter
+}
+
 /**
   * Represents a point in a pattern (route).
   * 
@@ -182,6 +192,7 @@ object Point:
     }
 
 case class Pattern(id: Int, routeDirection: String, points: IndexedSeq[Point])
+
 
 object Pattern:
   given Decoder[Pattern] = Decoder.forProduct3("pid", "rtdir", "pt") {
