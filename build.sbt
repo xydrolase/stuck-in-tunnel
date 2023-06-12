@@ -31,5 +31,14 @@ lazy val root = (project in file(".")).settings(
 
     "org.locationtech.jts"   % "jts-core"            % "1.19.0",
     "org.scalatest"         %% "scalatest"           % "3.2.15" % "test",
-  )
+  ),
+  assembly / mainClass := Some("stunnel.Application"),
+  ThisBuild / assemblyMergeStrategy := {
+    case "arrow-git.properties" => MergeStrategy.discard
+    case "module-info.class" => MergeStrategy.discard
+    case x if x.startsWith("META-INF") => MergeStrategy.discard 
+    case x =>
+      val oldStrategy = (ThisBuild / assemblyMergeStrategy).value
+      oldStrategy(x)
+  }
 )
