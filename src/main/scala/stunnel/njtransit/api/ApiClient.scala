@@ -3,6 +3,7 @@ package stunnel.njtransit.api
 import cats.syntax.flatMap.*
 import cats.syntax.functor.*
 import cats.effect.Concurrent
+import cats.effect.kernel.Clock
 import org.http4s.EntityDecoder
 import org.http4s.Method.GET
 import org.http4s.client.Client
@@ -31,7 +32,7 @@ trait MyBusNowApiClient[F[_]] {
   def getPatterns(route: String): F[Seq[Pattern]]
 }
 
-class Http4sMyBusNowApiClient[F[_]: Concurrent](client: Client[F], clock: Clock, keyProvider: KeyProvider[F]) extends MyBusNowApiClient[F] {
+class Http4sMyBusNowApiClient[F[_]: Concurrent: Clock](client: Client[F], keyProvider: KeyProvider[F]) extends MyBusNowApiClient[F] {
   val dsl = new Http4sClientDsl[F] {}
   import dsl.*
   
@@ -43,10 +44,9 @@ class Http4sMyBusNowApiClient[F[_]: Concurrent](client: Client[F], clock: Clock,
     * @return
     */
   protected def httpGet[A](uri: org.http4s.Uri)(using EntityDecoder[F, A]): F[A] = {
-    val xTime = clock.currentTimeMillis
-    val xDate = KeyProvider.formatTimestamp(xTime)
-
     for {
+      xTime <- Clock[F].realTime.map(_.toMillis)
+      xDate = KeyProvider.formatTimestamp(xTime)
       apiKey <- keyProvider.getKey
 
       uriWithKeyAndTime = uri

@@ -4,17 +4,18 @@ import fs2.{Stream, Pipe, Pull}
 import fs2.io.file.Path
 import cats.effect.{IO, Resource}
 import cats.effect.kernel.Ref
-import cats.effect.std.Queue
-import org.locationtech.jts.geom.LineSegment
+import cats.effect.std.{Queue, Hotswap}
+import org.apache.arrow.vector.ipc.ArrowFileWriter
 
 import java.io.FileOutputStream
 import java.nio.channels.Channels
 
 import stunnel.geometry.{given, *}
-import stunnel.njtransit.VehicleLocation
+import stunnel.geometry.GeoUtils.pointsCrossed
+import stunnel.njtransit.*
+import stunnel.concurrent.KeyedCache
 import sarrow.{SchemaFor, ArrowWriter, Indexable}
-import org.apache.arrow.vector.ipc.ArrowFileWriter
-import cats.effect.std.Hotswap
+import fs2.Chunk
 
 /**
  * Define operations to transform streams to be used by the application.
@@ -28,15 +29,6 @@ object Ops {
       fileWriter.writeBatch()
       writer.reset()
     }
-  }
-
-  opaque type VehicleMovement = (VehicleLocation, VehicleLocation)
-  object VehicleMovement:
-    def apply(vl1: VehicleLocation, vl2: VehicleLocation): VehicleMovement = (vl1, vl2)
-
-  extension (vm: VehicleMovement) {
-    def movement: LineSegment = CoordOf[VehicleLocation].lineBetween(vm._1, vm._2)
-    def currentLocation: VehicleLocation = vm._2
   }
 
   // a simple LRU cache (not thread-safe)
@@ -78,18 +70,41 @@ object Ops {
     in => go(in, new LRUCache(maxCacheSize)).stream
   }
 
-  def publishVehicleLocation(queue: Queue[IO, VehicleLocation]): Pipe[IO, VehicleLocation, VehicleLocation] = {
-    in => in.evalTap { vecLoc =>
-      queue.offer(vecLoc)
+  def trackBusStopArrivals(computePattern: String => IO[Pattern]): Pipe[IO, VehicleMovement, BusArrival] = {
+    in => in.flatMap { vm =>
+      val location = vm.currentLocation
+      Stream.eval(computePattern(location.route)).flatMap { pattern =>
+        val arrivals = pattern.pointsCrossed(vm.movement).filter(_.isStop).map { stop =>
+          BusArrival(location, stop)
+        }
+
+        Stream.emits(arrivals)
+      }
     }
   }
 
+  // simple pipe to publish elements of type [[T]] into a queue
+  def publishToQueue[T](queue: Queue[IO, T]): Pipe[IO, T, T] = {
+    in => in.evalTap { element =>
+      queue.offer(element)
+    }
+  }
+
+  /**
+   * A [[Pipe]] that writes incoming streaming elements of type [[T]] to output Arrow IPC files.
+   * Each file, once completes, will be emitted in the output stream (for downstream processing, e.g. upload to S3).
+   *
+   * @param computePath an [[IO]] effect that computes the output path of the arrow file. 
+   * @param limit The number of records to be written to an Arrow IPC file before the file rotates.
+   * @param batchSize The size of an Arrow record batch. Each batch is held in memory in a [[VectorSchemaRoot]] before
+   *                  flushed to the output Arrow IPC file.
+   */
   def writeArrowRotate[T: SchemaFor: Indexable](computePath: IO[Path], limit: Int, batchSize: Int): Pipe[IO, T, Path] = {
     val schemaFor = summon[SchemaFor[T]]
 
     def newFileWriter(writer: ArrowWriter[T]): Resource[IO, (Path, ArrowFileWriter)] =
       Resource
-        .eval(computePath)
+        .eval(computePath.flatTap(p => IO.println(s"## Opening file: $p")))
         .flatMap { p => 
           Resource.make(IO.blocking {
             val fos = new FileOutputStream(p.toString)
@@ -110,7 +125,7 @@ object Ops {
           val newFileAcc = fileAcc + hd.size
 
           val append = Pull.eval {
-            IO.println(s"Writing a batch of ${hd.size} inputs to writer") *> IO(hd.foreach(row => delegate.write(row)))
+            IO(hd.foreach(row => delegate.write(row)))
           }
 
           // check if we exceed the batch size, or the file limit
@@ -142,5 +157,5 @@ object Ops {
       stream <- go(hotswap, delegate, 0, 0, in).stream
     } yield stream
   }
-  
 }
+

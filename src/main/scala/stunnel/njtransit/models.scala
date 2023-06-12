@@ -5,12 +5,19 @@ import cats.Show
 import io.circe.{Decoder, ACursor}
 import org.http4s.EntityDecoder
 import org.http4s.circe.jsonOf
+import org.locationtech.jts.geom.LineSegment
 
 import java.time.{LocalTime, LocalDate, LocalDateTime}
 import java.time.format.DateTimeFormatter
 
-import sarrow.FieldTypeOf
-import stunnel.geometry.GeoUtils
+import sarrow.{FieldTypeOf, Indexable}
+import sarrow.Indexable.given
+import sarrow.FieldTypeOf.given
+import stunnel.geometry.{GeoUtils, CoordOf}
+import stunnel.geometry.given
+
+import scala.annotation.targetName
+import sarrow.Indexable.tupleIndexable
 
 def prepareDecoder(fieldName: String): ACursor => ACursor = (cur: ACursor) => {
   cur.downField("bustime-response").downField(fieldName)
@@ -205,3 +212,28 @@ object Pattern:
   given [F[_]: Concurrent]: EntityDecoder[F, Seq[Pattern]] = jsonOf
 
     
+// opaque types
+opaque type VehicleMovement = (VehicleLocation, VehicleLocation)
+object VehicleMovement:
+  def apply(vl1: VehicleLocation, vl2: VehicleLocation): VehicleMovement = (vl1, vl2)
+
+extension (vm: VehicleMovement) {
+  def movement: LineSegment = CoordOf[VehicleLocation].lineBetween(vm._1, vm._2)
+  def currentLocation: VehicleLocation = vm._2
+}
+
+opaque type BusArrival = (VehicleLocation, Point)
+object BusArrival:
+  // needed to derive FieldTypeOf[Point]
+  import PointType.given
+
+  def apply(loc: VehicleLocation, pnt: Point): BusArrival = (loc, pnt)
+
+  given FieldTypeOf[BusArrival] = fieldTypeOfTuple(using FieldTypeOf[VehicleLocation], FieldTypeOf[Point])
+  given Indexable[BusArrival] = tupleIndexable(using Indexable[VehicleLocation], Indexable[Point])
+
+extension (ba: BusArrival) {
+  @targetName("currentLocationForBusArrival")
+  def currentLocation: VehicleLocation = ba._1
+  def stop: Point = ba._2
+}

@@ -1,6 +1,7 @@
 package sarrow
 
 import magnolia1.*
+import cats.Show
 import org.apache.arrow.vector.types.pojo.{FieldType, Field, ArrowType}
 import org.apache.arrow.vector.types.{FloatingPointPrecision, TimeUnit => ArrowTimeUnit}
 
@@ -10,7 +11,6 @@ import java.time.LocalDateTime
 import scala.jdk.CollectionConverters._
 import scala.collection.immutable.ArraySeq
 import org.apache.arrow.vector.ValueVector
-import cats.Show
 import org.apache.arrow.vector.VarCharVector
 
 trait FieldTypeOf[T] {
@@ -28,6 +28,8 @@ trait FieldTypeOf[T] {
 
 
 object FieldTypeOf extends AutoDerivation[FieldTypeOf] { 
+  def apply[T: FieldTypeOf]: FieldTypeOf[T] = summon
+
   def apply[T](ft: FieldType): FieldTypeOf[T] = new FieldTypeOf[T] {
     val fieldType: FieldType = ft
   }
@@ -73,6 +75,18 @@ object FieldTypeOf extends AutoDerivation[FieldTypeOf] {
 
   // set timezone to null - the writer always convert time to UTC
   given fieldTypeOfLocalDateTime: FieldTypeOf[LocalDateTime] = apply(FieldType.notNullable(new ArrowType.Timestamp(ArrowTimeUnit.MILLISECOND, null))) 
+
+  given fieldTypeOfTuple[L, R](using ftoL: FieldTypeOf[L], ftoR: FieldTypeOf[R]): FieldTypeOf[(L, R)] = {
+    // TODO: support cases where either of L/R is not a struct
+    (ftoL.fieldType.getType(), ftoR.fieldType.getType()) match {
+      case (_: ArrowType.Struct, _: ArrowType.Struct) =>
+        val dupNames = ftoL.children.map(_._1).toSet.intersect(ftoR.children.map(_._2).toSet)
+        require(dupNames.isEmpty, s"Duplicate field name(s): [${dupNames.mkString(", ")}] are not allowed.")
+
+        apply(FieldType.nullable(new ArrowType.Struct()), ftoL.children ++ ftoR.children)
+      case _ => throw new IllegalArgumentException(s"Cannot derive FieldTypeOf for ${ftoL.fieldType} and ${ftoR.fieldType}")
+    }
+  }
 
   // type-class derivation
   def join[T](ctx: CaseClass[sarrow.FieldTypeOf, T]): FieldTypeOf[T] = {

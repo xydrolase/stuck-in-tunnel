@@ -1,22 +1,25 @@
 package stunnel
 
 import cats.effect.{IO, IOApp}
-import cats.effect.kernel.Ref
+import cats.effect.kernel.{Clock, Ref}
 import cats.effect.std.{Env, Queue}
 import cats.implicits.*
 import cats.effect.unsafe.IORuntime
 
 import org.http4s.ember.client.EmberClientBuilder
 import fs2.{Stream, Pipe}
+import fs2.io.file.Files
 
-import stunnel.njtransit.{Pattern, VehicleLocation}
+import stunnel.njtransit.*
 import stunnel.njtransit.api.*
 import stunnel.geometry.{given, *}
 import stunnel.geometry.GeoUtils.pointsCrossed
 
 import scala.concurrent.duration.*
 import stunnel.concurrent.{KeyedCache, ConcurrentKeyedCache}
-import fs2.io.file.Files
+import java.time.LocalDateTime
+import java.time.Instant
+import java.time.ZoneOffset
 
 object Application extends IOApp.Simple {
   val BatchSize = 20
@@ -25,61 +28,72 @@ object Application extends IOApp.Simple {
   def getRoutes: IO[List[String]] = Env[IO].get("STUNNEL_ROUTES").map(r => r.getOrElse("").split(',').toList)
 
   def buildStream(client: Http4sMyBusNowApiClient[IO], patternCache: KeyedCache[String, Pattern],
-                  vecLocQueue: Queue[IO, VehicleLocation]): Stream[IO, Unit] = {
+                  vecLocQueue: Queue[IO, VehicleLocation],
+                  busArrivalQueue: Queue[IO, BusArrival]): Stream[IO, Unit] = {
+    def getVehicles(route: String): IO[Seq[VehicleLocation]] = for {
+      vehicles <- client.getVehicles(route)
+      ts <- Clock[IO].realTime.map { dur => LocalDateTime.ofInstant(Instant.ofEpochMilli(dur.toMillis), ZoneOffset.UTC) }
+    } yield vehicles.map(vl => vl.copy(timestamp = ts))
+
+    def getPattern(route: String): IO[Pattern] = patternCache.loadNoExpiry(route)(client.getPatterns(route).map(_.head))
+
     Stream.awakeEvery[IO](10.seconds)
       .evalMap { _ =>
-        getRoutes.flatMap { routes => routes.map(r => client.getVehicles(r)).sequence }
+        for {
+          routes <- getRoutes
+          vehicles <- routes.map(r => getVehicles(r)).sequence
+        } yield vehicles
       }
       .flatMap { vehiclesOfRoutes => 
         vehiclesOfRoutes.foldLeft(Stream.empty[IO].asInstanceOf[Stream[IO, VehicleLocation]]) { case (s, vehicles) =>
           s ++ Stream.emits(vehicles)
         }
       }
-      .through(Ops.publishVehicleLocation(vecLocQueue))
+      .through(Ops.publishToQueue[VehicleLocation](vecLocQueue))
       // track at most 500 trips at once (with an LRU cache)
       .through(Ops.trackMovement(500))
-      .evalTap { vecMove =>
-        val vec = vecMove.currentLocation
-        patternCache.loadNoExpiry(vec.route)(client.getPatterns(vec.route).map(_.head)).flatMap { pattern =>
-          val arrivedStops = pattern.pointsCrossed(vecMove.movement).filter(_.isStop)
-          if (arrivedStops.nonEmpty) {
-            IO.println(s"[${vec.route}] Vehicle ${vec.vehicleId} (T${vec.tripId}) passed stop(s) ${arrivedStops.mkString(", ")}")
-          } else IO.unit
-        }
+      .through(Ops.trackBusStopArrivals(getPattern))
+      .evalTap { arrival =>
+        val vec = arrival.currentLocation
+        IO.println(s"[${vec.route}] Vehicle ${vec.vehicleId} (T${vec.tripId}) passed stop: ${arrival.stop}")
       }
+      .through(Ops.publishToQueue[BusArrival](busArrivalQueue))
       .void
   }
 
   def run: IO[Unit] = {
     val keyProvider = StaticKeyProvider[IO]("", "")
     val emberClient = EmberClientBuilder.default[IO].build
-    val clock = new Clock {
-      override def setOffset(offset: Long): Unit = ()
-      override def currentTimeMillis: Long = System.currentTimeMillis()
-    }
 
     emberClient.use { client =>
-      val apiClient = new Http4sMyBusNowApiClient[IO](client, clock, keyProvider)
+      val apiClient = new Http4sMyBusNowApiClient[IO](client, keyProvider)
       val patternCache = new ConcurrentKeyedCache[String, Pattern]()
 
       for {
         routes <- getRoutes
         _ <- IO.println(s"Routes: $routes")
         vecLocQueue <- Queue.unbounded[IO, VehicleLocation]
+        busArrivalQueue <- Queue.unbounded[IO, BusArrival]
 
-        producerStream = buildStream(apiClient, patternCache, vecLocQueue)
-        writerStream = Stream.fromQueueUnterminated(vecLocQueue, 16).through(
+        producerStream = buildStream(apiClient, patternCache, vecLocQueue, busArrivalQueue)
+        vecLocWriterStream = Stream.fromQueueUnterminated(vecLocQueue, 16).through(
           Ops.writeArrowRotate[VehicleLocation](
             Files[IO].tempFile(None, "stunnel_vec_loc_", ".arrow", permissions = None).use(p => IO.pure(p)),
             FileLimit, BatchSize
           )
-        ).evalTap { path =>
-          IO.println(s"File rotated: ${path.toString}")
-        }
+        )
+        arrivalWriterStream = Stream.fromQueueUnterminated(busArrivalQueue, 16).through(
+          Ops.writeArrowRotate[BusArrival](
+            Files[IO].tempFile(None, "stunnel_arrival_", ".arrow", permissions = None).use(p => IO.pure(p)),
+            FileLimit, BatchSize
+          )
+        )
 
         result <- Stream(
           producerStream,
-          writerStream
+          vecLocWriterStream.merge(arrivalWriterStream).evalTap { path =>
+            IO.println(s"## File rotated: ${path.toString}")
+          }
         ).parJoin(2).compile.drain
 
       } yield result 
