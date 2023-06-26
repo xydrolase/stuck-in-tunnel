@@ -1,11 +1,17 @@
 package stunnel
 
-import fs2.{Stream, Pipe, Pull}
+import fs2.{Stream, Pipe, Pull, Chunk}
 import fs2.io.file.Path
 import cats.effect.{IO, Resource}
 import cats.effect.kernel.Ref
 import cats.effect.std.{Queue, Hotswap}
 import org.apache.arrow.vector.ipc.ArrowFileWriter
+import fs2.aws.s3.S3
+import fs2.aws.s3.models.Models.{BucketName, FileKey, ETag}
+import io.laserdisc.pure.s3.tagless.{Interpreter => S3Interpreter}
+import software.amazon.awssdk.services.s3.S3AsyncClient
+import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.s3.model.PutObjectRequest
 
 import java.io.FileOutputStream
 import java.nio.channels.Channels
@@ -14,8 +20,8 @@ import stunnel.geometry.{given, *}
 import stunnel.geometry.GeoUtils.pointsCrossed
 import stunnel.njtransit.*
 import stunnel.concurrent.KeyedCache
+import stunnel.persist.ObjectKeyMaker
 import sarrow.{SchemaFor, ArrowWriter, Indexable}
-import fs2.Chunk
 
 /**
  * Define operations to transform streams to be used by the application.
@@ -156,6 +162,16 @@ object Ops {
         .map { case (hotswap, (path, fw)) => (hotswap, WriterDelegate(writer, fw, path)) }
       stream <- go(hotswap, delegate, 0, 0, in).stream
     } yield stream
+  }
+
+  def uploadToS3(s3: S3[IO], bucket: BucketName, keyMaker: ObjectKeyMaker): Pipe[IO, Path, ETag] = {
+    (in: Stream[IO, Path]) => {
+      in.flatMap { path =>
+        val key = keyMaker.createKey(path)
+        fs2.io.file.readAll[IO](path.toNioPath, 4096)
+          .through(s3.uploadFile(bucket, key))
+      }
+    }
   }
 }
 
