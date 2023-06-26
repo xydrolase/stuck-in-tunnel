@@ -7,13 +7,17 @@ import org.apache.arrow.vector.ipc.ArrowFileWriter
 import java.io.FileOutputStream
 import java.nio.channels.Channels
 
-import stunnel.njtransit.{Point, Pattern}
+import stunnel.njtransit.{Point, Pattern, Stop}
 import stunnel.geometry.GeoUtilsSpec
+
+import scala.jdk.CollectionConverters.*
 
 class SchemaForSpec extends AnyWordSpec with Matchers {
   "a SchemaFor" should {
     "be auto-derivable from case classes" in {
-      println(summon[SchemaFor[Point]].schema)
+      val p = Point(0, 1f, 2f, Stop, None, None, 10f)
+      summon[SchemaFor[Point]].schema.getFields().asScala
+       .map(_.getName) should contain theSameElementsInOrderAs p.productElementNames.toSeq
     }
 
     "support building an ArrowWriter" in {
