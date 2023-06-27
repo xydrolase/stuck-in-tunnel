@@ -66,6 +66,8 @@ class ArrowWriter[T: Indexable](val root: VectorSchemaRoot, fields: Array[ArrowF
   private var count: Int = 0
   private val indexable = summon[Indexable[T]]
 
+  def isDirty: Boolean = count > 0
+
   def write(input: T): Unit = {
     var i = 0
     while (i < fields.size) {
@@ -129,6 +131,8 @@ private[sarrow] abstract class ArrowFieldWriter {
     valueVector.reset()
     count = 0
   }
+
+  // TODO: close the underlying ValueVector?
 }
 
 private[sarrow] class BooleanWriter(val valueVector: BitVector) extends ArrowFieldWriter {

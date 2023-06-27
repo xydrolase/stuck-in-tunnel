@@ -35,6 +35,19 @@ object Ops {
       fileWriter.writeBatch()
       writer.reset()
     }
+
+    def close(): IO[Unit] = IO.blocking {
+      try {
+        // if there are still data unwritten to file, flush before closing.
+        if (writer.isDirty) {
+          writer.finish()
+          fileWriter.writeBatch()
+          writer.reset()
+        }
+      } finally {
+        fileWriter.close()
+      }
+    }
   }
 
   // a simple LRU cache (not thread-safe)
@@ -108,7 +121,7 @@ object Ops {
   def writeArrowRotate[T: SchemaFor: Indexable](computePath: IO[Path], limit: Int, batchSize: Int): Pipe[IO, T, Path] = {
     val schemaFor = summon[SchemaFor[T]]
 
-    def newFileWriter(writer: ArrowWriter[T]): Resource[IO, (Path, ArrowFileWriter)] =
+    def newFileWriter(writer: ArrowWriter[T]): Resource[IO, WriterDelegate[T]] =
       Resource
         .eval(computePath.flatTap(p => IO.println(s"## Opening file: $p")))
         .flatMap { p => 
@@ -116,16 +129,19 @@ object Ops {
             val fos = new FileOutputStream(p.toString)
             val fileWriter = new ArrowFileWriter(writer.root, null, Channels.newChannel(fos))
             fileWriter.start()
-            (p, fileWriter)
-          })(pathAndWriter => IO.blocking(pathAndWriter._2.close()))
+            WriterDelegate(writer, fileWriter, p)
+          })(delegate => delegate.close())
         }
 
-    def go(writerHotswap: Hotswap[IO, (Path, ArrowFileWriter)], delegate: WriterDelegate[T],
+    def go(writerHotswap: Hotswap[IO, WriterDelegate[T]], delegate: WriterDelegate[T],
            batchAcc: Int, fileAcc: Int, s: Stream[IO, T]): Pull[IO, Path, Unit] = {
 
       val toWrite = (limit - fileAcc).min(batchSize - batchAcc).min(Int.MaxValue)
       s.pull.unconsLimit(toWrite).flatMap {
-        case None => Pull.done
+        case None => 
+          // if there are pending records, make sure they are flushed
+          if (delegate.writer.isDirty) Pull.eval(delegate.close()) >> Pull.output1(delegate.path)
+          else Pull.done
         case Some((hd, tl)) =>
           val newBatchAcc = batchAcc + hd.size
           val newFileAcc = fileAcc + hd.size
@@ -142,9 +158,7 @@ object Ops {
               // output the current file to be closed
               Pull.output1(delegate.path) >> 
               Pull.eval {
-                writerHotswap
-                  .swap(newFileWriter(delegate.writer))
-                  .map { case (path, fileWriter) => WriterDelegate(delegate.writer, fileWriter, path) }
+                writerHotswap.swap(newFileWriter(delegate.writer))
               }
               .flatMap { d => 
                 // check if we need to reset batchAcc as well 
@@ -159,7 +173,6 @@ object Ops {
     (in: Stream[IO, T]) => for {
       writer <- Stream.resource(Resource.make(IO(schemaFor.buildArrowWriter()))(w => IO(w.reset())))
       (hotswap, delegate) <- Stream.resource(Hotswap(newFileWriter(writer)))
-        .map { case (hotswap, (path, fw)) => (hotswap, WriterDelegate(writer, fw, path)) }
       stream <- go(hotswap, delegate, 0, 0, in).stream
     } yield stream
   }
