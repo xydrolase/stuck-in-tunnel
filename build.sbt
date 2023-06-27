@@ -21,6 +21,7 @@ lazy val root = (project in file(".")).settings(
     "org.typelevel"         %% "cats-effect"         % CatsEffectVersion,
     "org.typelevel"         %% "cats-effect-kernel"  % CatsEffectVersion,
     "org.typelevel"         %% "cats-effect-std"     % CatsEffectVersion,
+    "org.typelevel"         %% "log4cats-slf4j"       % "2.6.0",
     "co.fs2"                %% "fs2-core"            % "3.6.1",
 
     "org.apache.arrow"       % "arrow-vector"        % "12.0.0",

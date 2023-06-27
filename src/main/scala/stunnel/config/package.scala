@@ -5,24 +5,36 @@ package config
 import fs2.aws.s3.models.Models.BucketName
 import software.amazon.awssdk.regions.Region
 import io.circe.Decoder
+import io.circe.generic.semiauto.*
 import eu.timepit.refined.types.string.NonEmptyString
 
 case class EncodingConfig(batchSize: Int, fileRecordsLimit: Int)
+object EncodingConfig {
+  given Decoder[EncodingConfig] = deriveDecoder
+}
 
 /**
  * Configuration for bus location tracking
  */
 case class TrackingConfig(routes: List[String], maxTrips: Int)
-
-case class PersistenceConfig(bucketName: BucketName, region: Region)
-object PersistenceConfig {
-  given Decoder[PersistenceConfig] = Decoder.forProduct2("bucket-name", "region") { 
-    (bucket: String, region: String) => PersistenceConfig(
-      BucketName(NonEmptyString.from(bucket)
-        .fold(invalid => throw new IllegalArgumentException(s"Invalid bucket name '$invalid'"), identity)),
-      Region.of(region)
-    )
-  }
+object TrackingConfig {
+  given Decoder[TrackingConfig] = deriveDecoder
 }
 
-case class AppConfig(encoding: EncodingConfig, tracking: TrackingConfig, persist: PersistenceConfig)
+case class PersistenceConfig(encoding: EncodingConfig, bucketName: BucketName, region: Region)
+object PersistenceConfig {
+  given Decoder[BucketName] = Decoder.decodeString.emap { name =>
+    NonEmptyString.from(name) match
+      case Left(invalid) => Left(s"Invalid bucket name '$invalid'")
+      case Right(value) => Right(BucketName(value))
+  }
+
+  given Decoder[Region] = Decoder.decodeString.map { region => Region.of(region) }
+
+  given Decoder[PersistenceConfig] = deriveDecoder
+}
+
+case class AppConfig(tracking: TrackingConfig, persistence: Map[String, PersistenceConfig])
+object AppConfig {
+  given Decoder[AppConfig] = deriveDecoder
+}
