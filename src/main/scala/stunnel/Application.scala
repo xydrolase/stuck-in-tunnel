@@ -81,7 +81,6 @@ object Application extends IOApp.Simple {
       .through(Ops.trackBusStopArrivals(getPattern))
       .evalTap { arrival =>
         val vec = arrival.currentLocation
-        // TODO: switch to log4cats
         Logger[IO].info(s"[${vec.route}] Vehicle ${vec.vehicleId} (T${vec.tripId}) passed stop: ${arrival.stop}")
       }
       .through(Ops.publishToQueue[BusArrival](busArrivalQueue))

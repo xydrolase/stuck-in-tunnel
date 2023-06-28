@@ -155,7 +155,8 @@ object Ops {
             append >> 
               // must flush the current batch before closing the file
               Pull.eval(delegate.writeBatch()) >> 
-              // output the current file to be closed
+              Pull.eval(IO.blocking(delegate.fileWriter.close())) >>
+              // output the current file
               Pull.output1(delegate.path) >> 
               Pull.eval {
                 writerHotswap.swap(newFileWriter(delegate.writer))
