@@ -89,15 +89,19 @@ object Ops {
     in => go(in, new LRUCache(maxCacheSize)).stream
   }
 
-  def trackBusStopArrivals(computePattern: String => IO[Pattern]): Pipe[IO, VehicleMovement, BusArrival] = {
+  def trackBusStopArrivals(computePattern: (String, Int) => IO[Option[Pattern]]): Pipe[IO, VehicleMovement, BusArrival] = {
     in => in.flatMap { vm =>
       val location = vm.currentLocation
-      Stream.eval(computePattern(location.route)).flatMap { pattern =>
-        val arrivals = pattern.pointsCrossed(vm.movement).filter(_.isStop).map { stop =>
-          BusArrival(location, stop)
-        }
+      Stream.eval(computePattern(location.route, location.patternId)).flatMap { 
+        // if pattern by the given id is found, find all arrivals; otherwise, emit nothing.
+        case Some(pattern) => 
+          val arrivals = pattern.pointsCrossed(vm.movement).filter(_.isStop).map { stop =>
+            BusArrival(location, stop)
+          }
 
-        Stream.emits(arrivals)
+          Stream.emits(arrivals)
+        case None =>
+          Stream.emits(Nil)
       }
     }
   }

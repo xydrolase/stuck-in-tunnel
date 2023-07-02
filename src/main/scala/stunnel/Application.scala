@@ -34,8 +34,8 @@ import scala.concurrent.duration.*
 import scala.util.control.NonFatal
 
 object Application extends IOApp.Simple {
-  val BatchSize = 100
-  val FileLimit = 500
+  val BatchSize = 500
+  val FileLimit = 2000
   val MaxTrips = 500
 
   val timeFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
@@ -51,7 +51,7 @@ object Application extends IOApp.Simple {
   }
 
   def buildStream(config: AppConfig, client: Http4sMyBusNowApiClient[IO],
-                  patternCache: KeyedCache[String, Pattern],
+                  patternCache: KeyedCache[Int, Option[Pattern]],
                   vecLocQueue: Queue[IO, VehicleLocation],
                   busArrivalQueue: Queue[IO, BusArrival]): Stream[IO, Unit] = {
     def getVehicles(route: String): IO[Seq[VehicleLocation]] = for {
@@ -62,7 +62,11 @@ object Application extends IOApp.Simple {
       ts <- Clock[IO].realTime.map { dur => LocalDateTime.ofInstant(Instant.ofEpochMilli(dur.toMillis), ZoneOffset.UTC) }
     } yield vehicles.map(vl => vl.copy(timestamp = ts))
 
-    def getPattern(route: String): IO[Pattern] = patternCache.loadNoExpiry(route)(client.getPatterns(route).map(_.head))
+    // get the pattern of a specific route based on the provided pattern ID, as a bus route may have multiple patterns
+    // (e.g different directions, or different destionations)
+    def getPattern(route: String, patternId: Int): IO[Option[Pattern]] = patternCache.loadNoExpiry(patternId) { 
+      client.getPatterns(route).map(patterns => patterns.find(_.id == patternId))
+    }
 
     Stream.awakeEvery[IO](10.seconds)
       .evalMap { _ =>
@@ -111,7 +115,7 @@ object Application extends IOApp.Simple {
   }
 
   def program(config: AppConfig, apiClient: Http4sMyBusNowApiClient[IO], s3: S3[IO]): IO[Unit] = {
-    val patternCache = new ConcurrentKeyedCache[String, Pattern]()
+    val patternCache = new ConcurrentKeyedCache[Int, Option[Pattern]]()
     val keyMaker = ObjectKeyMaker.datedWithPrefixSubdir(Some("raw_data"), delimiter = "_")
 
     for {
