@@ -182,12 +182,16 @@ object Ops {
     } yield stream
   }
 
-  def uploadToS3(s3: S3[IO], bucket: BucketName, keyMaker: ObjectKeyMaker): Pipe[IO, Path, ETag] = {
+  def uploadToS3(s3: S3[IO], bucket: BucketName, keyMaker: ObjectKeyMaker,
+                 persistLocally: Boolean = false): Pipe[IO, Path, ETag] = {
     (in: Stream[IO, Path]) => {
       in.flatMap { path =>
         val key = keyMaker.createKey(path)
         fs2.io.file.readAll[IO](path.toNioPath, 4096)
           .through(s3.uploadFile(bucket, key))
+          .evalTap { _ =>
+            if (!persistLocally) fs2.io.file.delete(path.toNioPath) else IO.unit
+          }
       }
     }
   }
